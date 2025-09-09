@@ -1,0 +1,107 @@
+static bool okHub75=false; static uint32_t hubLast=0;
+\
+// Carto_Minimal_v11.3a_hotkeys — adds label→page hotkeys (non-breaking)
+// OLED (SSD1322 via U8g2 HW SPI) + TCA8418 keypad (I2C, INT=7).
+
+#include "HUB75Config.h"
+#include "LegacyHub75.h"
+#include <Arduino.h>
+#include <Wire.h>
+#include "pins.h"
+#include "Display_SSD1322.h"
+#include "Keypad_TCA8418.h"
+#include "KeyLabels.h"
+#include "Pages.h"
+
+static Display_SSD1322  gDisp;
+static Keypad_TCA8418   gKeys;
+
+static PageManager  gPages;
+static HomePage     gHome;
+static SettingsPage gSettings;
+
+// Section pages (stubs for now)
+static TitlePage   gEngine1("Engine 1");
+static TitlePage   gEngine2("Engine 2");
+static TitlePage   gOsc1("Osc 1");
+static TitlePage   gOsc2("Osc 2");
+static TitlePage   gSubOsc("Sub Osc");
+static TitlePage   gAmp1("Amp 1");
+static TitlePage   gAmp2("Amp 2");
+static TitlePage   gAmp3("Amp 3");
+static TitlePage   gFilter("Filter");
+static TitlePage   gGlobalAmp("Global Amp");
+static TitlePage   gFX("FX");
+
+static char lastMsg[64] = "ready";
+
+void setup() {
+  Serial.begin(115200);
+  delay(20);
+  Serial.println("\\nCarto_Minimal boot");
+
+  // I2C at 400 kHz on UI bus
+  Wire.begin(UI_I2C_SDA, UI_I2C_SCL, 400000);
+  delay(5);
+
+  bool okDisp = gDisp.begin();
+  bool okKeys = gKeys.begin(Wire, TCA8418_INT);
+  Serial.printf("{\"oled\":%s,\"keys\":%s}\\n", okDisp?"true":"false", okKeys?"true":"false");
+
+  gDisp.clear();
+  gPages.begin(&gDisp);
+
+  // Add core + section pages and capture indices
+  uint8_t iHome      = gPages.add(&gHome);
+  uint8_t iSettings  = gPages.add(&gSettings);
+  uint8_t iEngine1   = gPages.add(&gEngine1);
+  uint8_t iEngine2   = gPages.add(&gEngine2);
+  uint8_t iOsc1      = gPages.add(&gOsc1);
+  uint8_t iOsc2      = gPages.add(&gOsc2);
+  uint8_t iSubOsc    = gPages.add(&gSubOsc);
+  uint8_t iAmp1      = gPages.add(&gAmp1);
+  uint8_t iAmp2      = gPages.add(&gAmp2);
+  uint8_t iAmp3      = gPages.add(&gAmp3);
+  uint8_t iFilter    = gPages.add(&gFilter);
+  uint8_t iGlobalAmp = gPages.add(&gGlobalAmp);
+  uint8_t iFX        = gPages.add(&gFX);
+
+  // Bind hotkeys (label → page). Labels must match KeyLabels.h entries.
+  gPages.bind("BTN_ENGINE1",    iEngine1);
+  gPages.bind("BTN_ENGINE2",    iEngine2);
+  gPages.bind("BTN_OSC1",       iOsc1);
+  gPages.bind("BTN_OSC2",       iOsc2);
+  gPages.bind("BTN_SUBOSC",     iSubOsc);
+  gPages.bind("BTN_AMP1",       iAmp1);
+  gPages.bind("BTN_AMP2",       iAmp2);
+  gPages.bind("BTN_AMP3",       iAmp3);
+  gPages.bind("BTN_FILTER",     iFilter);
+  gPages.bind("BTN_GLOBAL_AMP", iGlobalAmp);
+  gPages.bind("BTN_FX",         iFX);
+  gPages.bind("BTN_SETTINGS",   iSettings); // convenience
+
+  gPages.show(iHome);            // start on Home
+  gDisp.present();
+  okHub75 = hub75_begin();
+}
+
+void loop() {
+  // Drain keypad events; act on press (down) only
+  gKeys.poll([&](uint8_t row, uint8_t col, bool down){
+    if (!down) return;
+    const char* label = (row < 8 && col < 10) ? KEY_LABELS[row][col] : "";
+    snprintf(lastMsg, sizeof(lastMsg), "%s down", label);
+    Serial.printf("{\"type\":\"key\",\"row\":%u,\"col\":%u,\"label\":\"%s\",\"action\":\"down\"}\\n",
+                  row, col, label);
+    gPages.onKeyLabel(label);
+  });
+
+  static uint32_t tPrev = 0;
+  uint32_t now = millis();
+  if (now - tPrev >= 100) {
+    tPrev = now;
+    gDisp.status(lastMsg);
+    gDisp.present();
+  if(okHub75 && millis()-hubLast>=33){ hubLast=millis(); hub75_tick(); }  // flush once per frame
+  }
+}
